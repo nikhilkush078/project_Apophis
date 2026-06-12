@@ -123,8 +123,8 @@ ASTEROID_GRAY_3 = (75, 77, 80)
 try:
     # Load background music and play on loop (-1)
     pygame.mixer.music.load("background.mp3")
-    pygame.mixer.music.set_volume(0.4)
-    pygame.mixer.music.play(-1)
+    #pygame.mixer.music.set_volume(0.4)
+    #pygame.mixer.music.play(-1)
     
     # Load sound effects
     sound_shoot = pygame.mixer.Sound("bullet_shoot.mp3")
@@ -200,7 +200,7 @@ NUM_SECTIONS = 5 * 5
 SECTION_HEIGHT = WORLD_HEIGHT // NUM_SECTIONS
 
 # Fleet tuning values
-MOTHERSHIP_COUNT = 30
+MOTHERSHIP_COUNT = 50
 GRID_COLS = 5 * 5
 GRID_ROWS = 5 * 5
 
@@ -240,6 +240,7 @@ while current_belt_y < WORLD_HEIGHT:
 GRID_CELL_WIDTH = (WORLD_WIDTH - BOUNDARY_X) // GRID_COLS
 GRID_CELL_HEIGHT = WORLD_HEIGHT // GRID_ROWS
 
+game_font = pygame.font.SysFont("Arial", 20)
 grid_data = [[0 for _ in range(GRID_COLS)] for _ in range(GRID_ROWS)]
 
 high_value_cells = []
@@ -291,7 +292,7 @@ CIRCLE_ALPHA = 50
 
 # --- LASER BULLET SYSTEM ---
 police_bullets = []
-LASER_SPEED = 1.0
+LASER_SPEED = 3.0
 FIRE_COOLDOWN = 120  
 
 # --- HEAVY MOTHERSHIPS CONFIG ---
@@ -820,6 +821,14 @@ while running:
         time_bar_y = 95
         time_remaining_ratio = max(0.0, min(1.0, remaining_time / max_time))
         pygame.draw.rect(screen, BLUE, (time_bar_x, time_bar_y, int(time_bar_width * time_remaining_ratio), time_bar_height))
+
+    score_surface = game_font.render(f"X: {int(player_x)}", True, (255, 255, 255))
+    screen.blit(score_surface, (750, 40))
+    score_surface_1 = game_font.render(f"Y: {int(player_y)}", True, (255, 255, 255))
+    screen.blit(score_surface_1, (750, 60))
+    score_surface_2 = game_font.render("Coordinates", True, (255, 255, 255))
+    screen.blit(score_surface_2, (750, 20))
+
 
     # --- GAME OVER SCREEN HUD ---
     if game_over:
