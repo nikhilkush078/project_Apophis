@@ -3,8 +3,9 @@ import random
 import math
 import sys
 
-# 1. INITIALIZE PYGAME
+# 1. INITIALIZE PYGAME AND MIXER
 pygame.init()
+pygame.mixer.init()
 
 SCREEN_WIDTH = 900
 SCREEN_HEIGHT = 700
@@ -41,7 +42,29 @@ ASTEROID_GRAY_1 = (100, 102, 105)
 ASTEROID_GRAY_2 = (140, 142, 145)
 ASTEROID_GRAY_3 = (75, 77, 80)
 
-#====================================================================
+# ====================================================================
+# --- AUDIO ASSET LOADING ---
+# ====================================================================
+try:
+    # Load background music and play on loop (-1)
+    pygame.mixer.music.load("background.mp3")
+    pygame.mixer.music.set_volume(0.4)
+    pygame.mixer.music.play(-1)
+    
+    # Load sound effects
+    sound_shoot = pygame.mixer.Sound("bullet_shoot.mp3")
+    sound_hit = pygame.mixer.Sound("bullet_hit.mp3")
+    
+    # Adjust SFX volume channels if needed
+    sound_shoot.set_volume(0.3)
+    sound_hit.set_volume(0.6)
+except pygame.error as e:
+    print(f"Warning: Audio file asset missing or failed to initialize: {e}")
+    # Fallback dummies so code doesn't crash if missing files during testing
+    sound_shoot = None
+    sound_hit = None
+
+# ====================================================================
 
 # --- WORLD SIZE EXPANSION ---
 WORLD_WIDTH = SCREEN_WIDTH * 5
@@ -93,13 +116,18 @@ try:
     water_img_base = pygame.image.load("water.png").convert_alpha()
     rock_img_base = pygame.image.load("rock.png").convert_alpha()
 except pygame.error as e:
-    print(f"Error loading assets: {e}")
+    print(f"Error loading image assets: {e}")
     sys.exit()
 
 # --- THE MAP BOUNDARY & ASTEROID BELT SETUP ---
 BOUNDARY_X = 300 
 NUM_SECTIONS = 5 * 5  
-SECTION_HEIGHT = WORLD_HEIGHT // NUM_SECTIONS  
+SECTION_HEIGHT = WORLD_HEIGHT // NUM_SECTIONS
+
+# Fleet tuning values
+MOTHERSHIP_COUNT = 30
+GRID_COLS = 5 * 5
+GRID_ROWS = 5 * 5
 
 asteroid_belt = []
 current_belt_y = 0
@@ -133,9 +161,7 @@ while current_belt_y < WORLD_HEIGHT:
     asteroid_belt.append(asteroid_node)
     current_belt_y += ah
 
-# --- 4x4 GRID SETUP ---
-GRID_COLS = 4 * 5
-GRID_ROWS = 4 * 5
+# --- 5x5 GRID SETUP ---
 GRID_CELL_WIDTH = (WORLD_WIDTH - BOUNDARY_X) // GRID_COLS
 GRID_CELL_HEIGHT = WORLD_HEIGHT // GRID_ROWS
 
@@ -155,7 +181,6 @@ for _ in range(10):
     aw = random.randint(35, 60)
     ah = random.randint(35, 60)
     
-    # Scale resource specific textures on creation based on their dynamic rectangle size
     if atype == "fuel":
         scaled_img = pygame.transform.scale(fuel_img_base, (aw, ah))
     elif atype == "water":
@@ -177,10 +202,9 @@ player_h = 20
 player_vx = 0.0
 player_vy = 0.0
 player_angle = 0.0
-
-rotation_speed = 4.0 / 5.0          
-acceleration_power = 0.07 / 5.0     
-translation_power = 0.07 / 5.0      
+player_max_health = 5
+player_health = player_max_health
+player_flash_timer = 0.0  # Used to show visual damage hit response
 
 # Pre-scale the raw player texture according to structural boundaries
 player_surface = pygame.transform.scale(player_img_base, (player_w, player_h))
@@ -204,17 +228,27 @@ MOTHERSHIP_SPEED = 0.3 / 5.0
 # Pre-scale mothership texture asset
 mothership_surface = pygame.transform.scale(mothership_img_base, (MOTHERSHIP_SIZE, MOTHERSHIP_SIZE))
 
-mothership_positions = [
-    (BOUNDARY_X + 200, 200),                                   
-    (WORLD_WIDTH - 250, 200),                                  
-    (BOUNDARY_X + 200, WORLD_HEIGHT - 300),                   
-    (WORLD_WIDTH - 250, WORLD_HEIGHT - 300),                  
-    (WORLD_WIDTH // 2, WORLD_HEIGHT // 2),                    
-    (WORLD_WIDTH // 2, 400),                                   
-    (WORLD_WIDTH // 2, WORLD_HEIGHT - 500),                   
-    (BOUNDARY_X + 500, WORLD_HEIGHT // 2),                    
-    (WORLD_WIDTH - 600, WORLD_HEIGHT // 2)                    
+base_mothership_positions = [
+    (BOUNDARY_X + 200, 200),
+    (WORLD_WIDTH - 250, 200),
+    (BOUNDARY_X + 200, WORLD_HEIGHT - 300),
+    (WORLD_WIDTH - 250, WORLD_HEIGHT - 300),
+    (WORLD_WIDTH // 2, WORLD_HEIGHT // 2),
+    (WORLD_WIDTH // 2, 400),
+    (WORLD_WIDTH // 2, WORLD_HEIGHT - 500),
+    (BOUNDARY_X + 500, WORLD_HEIGHT // 2),
+    (WORLD_WIDTH - 600, WORLD_HEIGHT // 2),
 ]
+
+mothership_positions = []
+for i in range(MOTHERSHIP_COUNT):
+    if i < len(base_mothership_positions):
+        mothership_positions.append(base_mothership_positions[i])
+    else:
+        mothership_positions.append((
+            random.randint(BOUNDARY_X + 150, WORLD_WIDTH - 250),
+            random.randint(100, WORLD_HEIGHT - 200),
+        ))
 
 motherships = []
 for i, pos in enumerate(mothership_positions):
@@ -231,7 +265,7 @@ for i, pos in enumerate(mothership_positions):
 
 # --- DYNAMIC POLICE FLEET ---
 police_w = 15   
-police_h = 15  
+police_h = 15   
 police_speed = 1.5 / 5.0  
 
 # Pre-scale police fleet texture asset
@@ -270,6 +304,11 @@ SWAP_INTERVAL = 7.0
 last_known_predict_x = None
 last_known_predict_y = None
 
+
+rotation_speed = 4.0 / 5.0          
+acceleration_power = 0.07 / 5.0     
+translation_power = 0.07 / 5.0   # <--- Right here
+
 # Pre-scale the recharge surfaces using the context-appropriate asset mappings
 fuel_base_station_img = pygame.transform.scale(fuel_img_base, (my_rect.width, my_rect.height))
 water_base_station_img = pygame.transform.scale(water_img_base, (my_rect_2.width, my_rect_2.height))
@@ -285,6 +324,9 @@ while running:
     water_indicator = max(0, water_indicator - (dw * 0.05))
     swap_ticks += dt
     
+    if player_flash_timer > 0:
+        player_flash_timer -= dt
+
     for m in motherships:
         if m["shoot_cooldown"] > 0: m["shoot_cooldown"] -= 1
         
@@ -365,7 +407,7 @@ while running:
             elif res_ast["type"] == "water":
                 water_indicator = min(100.0, water_indicator + dt * 8.0)  
 
-    # --- UPDATE LASER BULLETS & CHECK COLLISIONS ---
+    # --- UPDATE LASER BULLETS & CHECK HEALTH DAMAGE CONDITIONS ---
     for bullet in police_bullets[:]:
         bullet["x"] += bullet["vx"]
         bullet["y"] += bullet["vy"]
@@ -376,7 +418,13 @@ while running:
             
         bullet_rect = pygame.Rect(bullet["x"], bullet["y"], 2, 2)
         if bullet_rect.colliderect(player_current_rect):
-            game_over = True
+            police_bullets.remove(bullet)
+            player_health -= 1
+            player_flash_timer = 0.15  # Trigger a screen/sprite flash indicator duration
+            if sound_hit:
+                sound_hit.play()
+            if player_health <= 0:
+                game_over = True
             break
 
     # --- INFILTRATION RUN TRACKING ---
@@ -446,6 +494,8 @@ while running:
                 pred_my = player_y + (player_vy * t_intercept)
                 
                 base_angle = math.atan2(pred_my - m["y"], pred_mx - m["x"])
+                if sound_shoot:
+                    sound_shoot.play()
                 for variance in [-0.12, 0.0, 0.12]:  
                     police_bullets.append({
                         "x": m["x"] + (MOTHERSHIP_SIZE // 2),
@@ -487,6 +537,8 @@ while running:
                 predicted_target_y = player_y + (player_vy * time_to_target)
                 angle_to_prediction = math.atan2(predicted_target_y - police["y"], predicted_target_x - police["x"])
                 
+                if sound_shoot:
+                    sound_shoot.play()
                 police_bullets.append({
                     "x": police["x"], "y": police["y"],
                     "vx": math.cos(angle_to_prediction) * LASER_SPEED,
@@ -585,35 +637,6 @@ while running:
 
     pygame.draw.rect(SAFE_ZONE_SURFACE, SAFE_ZONE_COLOR, (0 - camera_x, 0 - camera_y, BOUNDARY_X, WORLD_HEIGHT))
     virtual_screen.blit(SAFE_ZONE_SURFACE, (0, 0))
-    
-    #for i in range(1, NUM_SECTIONS):
-        #pygame.draw.line(virtual_screen, (25, 30, 35), (0 - camera_x, i * SECTION_HEIGHT - camera_y), (WORLD_WIDTH - camera_x, i * SECTION_HEIGHT - camera_y), 1)
-
-    # Render Grid Boxes
-    for row in range(GRID_ROWS):
-        for col in range(GRID_COLS):
-            cell_left = BOUNDARY_X + (col * GRID_CELL_WIDTH)
-            cell_top = row * GRID_CELL_HEIGHT
-            cell_value = grid_data[row][col]
-            
-            cam_cell_left = cell_left - camera_x
-            cam_cell_top = cell_top - camera_y
-
-            if (-GRID_CELL_WIDTH <= cam_cell_left <= VIRTUAL_WIDTH) and (-GRID_CELL_HEIGHT <= cam_cell_top <= VIRTUAL_HEIGHT):
-                if cell_value > 0:
-                    temp_surface = pygame.Surface((GRID_CELL_WIDTH, GRID_CELL_HEIGHT))
-                    opacity = min(int(cell_value * 1.5), 160)
-                    temp_surface.set_alpha(opacity)
-                    temp_surface.fill((255, 0, 0))
-                   # virtual_screen.blit(temp_surface, (cam_cell_left, cam_cell_top))
-
-                   # text_surface = font.render(str(cell_value), True, (255, 255, 255))
-                    #virtual_screen.blit(text_surface, (cam_cell_left + (GRID_CELL_WIDTH//2) - 12, cam_cell_top + (GRID_CELL_HEIGHT//2) - 8))
-
-                #if is_inside_now and (row, col) in cells_visited_this_run:
-                    #pygame.draw.rect(virtual_screen, (255, 255, 255), (cam_cell_left, cam_cell_top, GRID_CELL_WIDTH, GRID_CELL_HEIGHT), 2)
-                #else:
-                    #pygame.draw.rect(virtual_screen, (40, 40, 50), (cam_cell_left, cam_cell_top, GRID_CELL_WIDTH, GRID_CELL_HEIGHT), 1)
 
     # Render Edge Boundary Asteroids
     for roid in asteroid_belt:
@@ -623,7 +646,7 @@ while running:
         if (-r_box.width <= cam_rx <= VIRTUAL_WIDTH) and (-r_box.height <= cam_ry <= VIRTUAL_HEIGHT):
             pygame.draw.rect(virtual_screen, roid["color"], (cam_rx, cam_ry, r_box.width, r_box.height))
 
-    # Render Resource & Rock Asteroids (Replaced rectangles with scaled image sprites)
+    # Render Resource & Rock Asteroids
     for res_ast in resource_asteroids:
         r_box = res_ast["rect"]
         cam_rx = r_box.x - camera_x
@@ -665,25 +688,26 @@ while running:
 
     virtual_screen.blit(CIRCLE_SURFACE, (0, 0))
 
-    # Draw Heavy Motherships (Replaced rectangles with scaled image sprites)
+    # Draw Heavy Motherships
     for m in motherships:
         cam_mx = int(m["x"] - camera_x)
         cam_my = int(m["y"] - camera_y)
         if (-MOTHERSHIP_SIZE <= cam_mx <= VIRTUAL_WIDTH) and (-MOTHERSHIP_SIZE <= cam_my <= VIRTUAL_HEIGHT):
             virtual_screen.blit(mothership_surface, (cam_mx, cam_my))
 
-    # Draw Police Entities (Replaced rectangles with scaled image sprites)
+    # Draw Police Entities
     for police in police_fleet:
         cam_px = int(police["x"] - camera_x)
         cam_py = int(police["y"] - camera_y)
         if (-police_w <= cam_px <= VIRTUAL_WIDTH) and (-police_h <= cam_py <= VIRTUAL_HEIGHT):
             virtual_screen.blit(police_surface, (cam_px, cam_py))
 
-    # Draw Player (Replaced color layer calculation with rotation of loaded player image asset)
+    # Draw Player (With dynamic damage flashing frame intervals)
     if not game_over:
-        rotated_player = pygame.transform.rotate(player_surface, player_angle)
-        new_rect = rotated_player.get_rect(center=(int(player_x - camera_x), int(player_y - camera_y)))
-        virtual_screen.blit(rotated_player, new_rect.topleft)
+        if player_flash_timer <= 0 or int(pygame.time.get_ticks() / 50) % 2 == 0:
+            rotated_player = pygame.transform.rotate(player_surface, player_angle)
+            new_rect = rotated_player.get_rect(center=(int(player_x - camera_x), int(player_y - camera_y)))
+            virtual_screen.blit(rotated_player, new_rect.topleft)
 
     # =====================================================================
     # --- STRETCH CANVAS AND DRAW SCREEN HUD ---
@@ -691,7 +715,7 @@ while running:
     scaled_surface = pygame.transform.scale(virtual_screen, (SCREEN_WIDTH, SCREEN_HEIGHT))
     screen.blit(scaled_surface, (0, 0))
 
-    # HUD indicators
+    # HUD Resource Indicators
     fule_indicator_rect = pygame.Rect(10, 10, int(fule * 2), 20)
     pygame.draw.rect(screen, GREEN, fule_indicator_rect)
     pygame.draw.rect(screen, WHITE, (10, 10, 200, 20), 2)
@@ -704,11 +728,22 @@ while running:
     text_surface = font.render(f"Water: {water_indicator:.2f}", True, RED)
     screen.blit(text_surface, (10, 42))
 
+    # --- NEW PLAYER SHIELD / HEALTH METRIC HUD ---
+    health_label = font.render("Shield integrity:", True, WHITE)
+    screen.blit(health_label, (10, 70))
+    for h_box in range(player_max_health):
+        h_rect = pygame.Rect(135 + (h_box * 15), 72, 10, 14)
+        if h_box < player_health:
+            pygame.draw.rect(screen, PLAYER_COLOR, h_rect)
+        else:
+            pygame.draw.rect(screen, (40, 40, 45), h_rect)
+        pygame.draw.rect(screen, WHITE, h_rect, 1)
+
     if any_car_chasing and remaining_time > 0:
         time_bar_width = 150
         time_bar_height = 5
         time_bar_x = 10
-        time_bar_y = 65
+        time_bar_y = 95
         time_remaining_ratio = max(0.0, min(1.0, remaining_time / max_time))
         pygame.draw.rect(screen, BLUE, (time_bar_x, time_bar_y, int(time_bar_width * time_remaining_ratio), time_bar_height))
 
@@ -736,6 +771,8 @@ while running:
                         caught_timer = 0
                         fule = 100
                         water_indicator = 20
+                        player_health = player_max_health
+                        player_flash_timer = 0.0
                         player_x = 150.0
                         player_y = 350.0
                         player_vx = 0.0
@@ -755,7 +792,7 @@ while running:
                             m["chasing"] = False
                             m["shoot_cooldown"] = random.randint(0, FIRE_COOLDOWN)
                             
-                        cells_visited_this_run = [] # Clears uncommitted layout steps only
+                        cells_visited_this_run = [] 
                         waiting = False
                     elif event.key == pygame.K_q:
                         running = False
