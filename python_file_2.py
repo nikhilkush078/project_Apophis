@@ -2,6 +2,10 @@ import pygame
 import random
 import math
 import sys
+import os
+import tempfile
+import cv2
+from moviepy import VideoFileClip
 
 # 1. INITIALIZE PYGAME AND MIXER
 pygame.init()
@@ -13,6 +17,77 @@ screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
 pygame.display.set_caption("Space Infiltration - Intercept Network")
 
 clock = pygame.time.Clock()
+
+
+def play_intro_video(screen, clock, path="intro.mp4"):
+    cap = cv2.VideoCapture(path)
+    if not cap.isOpened():
+        print("Warning: Intro video could not be loaded.")
+        return
+
+    audio_path = None
+    try:
+        clip = VideoFileClip(path)
+        if clip.audio is not None:
+            audio_path = os.path.join(tempfile.gettempdir(), "intro_audio.wav")
+            clip.audio.write_audiofile(audio_path, logger=None)
+            pygame.mixer.music.load(audio_path)
+            pygame.mixer.music.play()
+        clip.close()
+    except Exception as e:
+        print(f"Warning: Intro audio could not be prepared: {e}")
+
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        h, w = frame.shape[:2]
+        scale = min(SCREEN_WIDTH / w, SCREEN_HEIGHT / h)
+        new_w = max(1, int(w * scale))
+        new_h = max(1, int(h * scale))
+
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        surface = pygame.image.frombuffer(rgb_frame.tobytes(), (w, h), "RGB")
+        surface = pygame.transform.scale(surface, (new_w, new_h))
+        dest = ((SCREEN_WIDTH - new_w) // 2, (SCREEN_HEIGHT - new_h) // 2)
+
+        screen.fill((0, 0, 0))
+        screen.blit(surface, dest)
+        pygame.display.flip()
+
+        fps = cap.get(cv2.CAP_PROP_FPS) or 30
+        clock.tick(int(fps))
+
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                cap.release()
+                if audio_path and os.path.exists(audio_path):
+                    try:
+                        os.remove(audio_path)
+                    except OSError:
+                        pass
+                pygame.quit()
+                sys.exit()
+            if event.type == pygame.KEYDOWN and event.key in (pygame.K_SPACE, pygame.K_ESCAPE):
+                cap.release()
+                if audio_path and os.path.exists(audio_path):
+                    try:
+                        os.remove(audio_path)
+                    except OSError:
+                        pass
+                return
+
+    cap.release()
+    if audio_path and os.path.exists(audio_path):
+        try:
+            os.remove(audio_path)
+        except OSError:
+            pass
+
+
+#play_intro_video(screen, clock)
+
 font = pygame.font.SysFont("Arial", 16, bold=True)
 
 # Colors
@@ -320,7 +395,6 @@ while running:
     frame_ms = clock.tick(60)
     dt = frame_ms / 1000.0
     dw = frame_ms / 1000.0
-    
     water_indicator = max(0, water_indicator - (dw * 0.05))
     swap_ticks += dt
     
@@ -686,7 +760,7 @@ while running:
                 pygame.draw.circle(CIRCLE_SURFACE, (0, 100, 255, CIRCLE_ALPHA // 2), (cam_cx, cam_cy), LOSE_RADIUS)
                 pygame.draw.circle(CIRCLE_SURFACE, (50, 150, 255, 90), (cam_cx, cam_cy), LOSE_RADIUS, 1)
 
-    virtual_screen.blit(CIRCLE_SURFACE, (0, 0))
+    #virtual_screen.blit(CIRCLE_SURFACE, (0, 0))
 
     # Draw Heavy Motherships
     for m in motherships:
